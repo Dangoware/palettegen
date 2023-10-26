@@ -1,7 +1,7 @@
 use std::env;
 
 use image::io::Reader as ImageReader;
-use palette::color_difference::HyAb;
+use palette::color_difference::{HyAb, EuclideanDistance};
 use palette::{LinSrgb, Srgb, Luv, IntoColor};
 
 use color_thief::ColorFormat;
@@ -38,7 +38,7 @@ fn main() {
     let now = std::time::Instant::now();
     let colors = get_palette(
         &img_bytes,
-        20,
+        10,
         num,
         &(img.width() as usize),
     );
@@ -61,61 +61,97 @@ struct Color {
     b: u8,
 }
 
+const MIN_DIST: f32 = 30.0;
+
+struct ColorData {
+    luv: Luv,
+    rgb: [u8; 4],
+    position: (usize, usize),
+    weight: usize
+}
+
 fn get_palette(
     bytes: &[u8],
     step_by: usize,
     target_len: &usize,
     width: &usize,
 ) -> Vec<Color> {
-    const MIN_DIST: f32 = 30.0;
-
     // Generate a Vec to store the color data
-    let mut colors: Vec<(Luv, usize, [u8; 4], (usize, usize))> = Vec::new();
+    let mut colors: Vec<ColorData> = Vec::new();
 
     // Hold the previous color
     let mut prev_color: Luv = LinSrgb::from_components((0.0, 0.0, 0.0)).into_color();
+
+    // Take chunks of 4 bytes (1 pixel), skipping `step_by` pixels
     'main_img: for (i, pixel) in bytes.chunks_exact(4).enumerate().step_by(step_by) {
+
+        // If the pixel is all black or entirely transparent, skip it
         if (pixel[0] == 0 && pixel[1] == 0 && pixel[2] == 0) || pixel[3] == 0 {
             continue;
         }
+
+        // Create a new `srgb` and `luv` mapped color for the pixel
         let pixel_srgb: LinSrgb<f32> = Srgb::new(pixel[0], pixel[1], pixel[2]).into();
         let pixel_luv: Luv = pixel_srgb.into_color();
 
-        //println!("{}", pixel_luv.distance(prev_color));
-        if pixel_luv.hybrid_distance(prev_color) < 50.0 {
-            prev_color += (pixel_luv + prev_color) / 2.0;
+        // Get the distance to the previous color, if it's too close, skip it because we don't care
+        if pixel_luv.hybrid_distance(prev_color) < 60.0 {
+            //prev_color = pixel_luv;
             continue;
         }
 
+        // Get the X and Y position in the image, all we have with `i` is
+        // the position within the bytes of the image
         let geo_pos = (i % width, i / width);
 
+        // Loop over all collected colors
         for color in &mut colors {
-            let dist = pixel_luv.hybrid_distance(color.0);
-            //println!("{}", dist);
-            let geo_dist = geometric_distance(geo_pos, color.3);
+
+            // Get the distance to the other color in colorspace `Luv`
+            // and then the distance between the pixels on the X Y plane of the image
+            let dist = pixel_luv.hybrid_distance(color.luv);
+            let geo_dist = geometric_distance(geo_pos, color.position);
+
+            // If the colorspace distance is below MIN_DIST...
             if dist < MIN_DIST {
-                color.0 = (pixel_luv + color.0) / 2.0;
-                color.2 = average(color.2, pixel.try_into().unwrap());
-                color.1 += ((100.0 * dist) as f64 + (100.0 * geo_dist.recip())) as usize;
-                prev_color = color.0;
-                continue 'main_img;
+
+                // Take the previous pixel's color and the current one
+                // and add them together, then divide by 2 (to get a rough average)
+                color.luv = (pixel_luv + color.luv) / 2.0;
+                color.rgb = average(color.rgb, pixel.try_into().unwrap());
+
+                // Calculate the weight using this math that I just experimented with
+                // until it worked
+                color.weight += ((100.0 * dist) as f64 + (100.0 * geo_dist.recip())) as usize;
+
+                prev_color = color.luv;
+                continue 'main_img; // skips the outer loop
             }
         }
-        colors.push((pixel_luv, 1, pixel.try_into().unwrap(), geo_pos))
+
+        // If the loop above does not `continue`, then the color wasn't found
+        // so add it to the vec!
+        colors.push(ColorData {
+            luv: pixel_luv,
+            rgb: pixel.try_into().unwrap(),
+            position: geo_pos,
+            weight: 1
+        })
     }
 
-    colors.par_sort_by_key(|x| x.1);
+    // Sorts by the weight
+    colors.sort_by_key(|color| color.weight);
     colors.reverse();
 
     let mut colors_vec: Vec<Color> = colors
-        .par_iter()
-        .map(|x|
+        .iter()
+        .map(|color|
         {
             //println!("\x1b[38;2;{};{};{}m██\x1b[0m - {}", x.2[0], x.2[1], x.2[2], x.1);
             Color {
-                r: x.2[0],
-                g: x.2[1],
-                b: x.2[2],
+                r: color.rgb[0],
+                g: color.rgb[1],
+                b: color.rgb[2],
             }
         })
         .collect();
