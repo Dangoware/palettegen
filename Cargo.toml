@@ -6,3 +6,9 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+color-rs = "0.8.0"
+color-thief = "0.2.2"
+image = "0.24.7"
+numquant = "0.2.0"
+palette = "0.7.3"
+rayon = "1.8.0"
