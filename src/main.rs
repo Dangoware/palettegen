@@ -1,7 +1,7 @@
 use std::env;
 
 use image::io::Reader as ImageReader;
-use palette::color_difference::{HyAb, EuclideanDistance};
+use palette::color_difference::HyAb;
 use palette::{LinSrgb, Srgb, Luv, IntoColor};
 
 use color_thief::ColorFormat;
@@ -38,7 +38,7 @@ fn main() {
     let now = std::time::Instant::now();
     let colors = get_palette(
         &img_bytes,
-        10,
+        20,
         num,
         &(img.width() as usize),
     );
@@ -61,14 +61,14 @@ struct Color {
     b: u8,
 }
 
-const MIN_DIST: f32 = 30.0;
-
 fn get_palette(
     bytes: &[u8],
     step_by: usize,
     target_len: &usize,
     width: &usize,
 ) -> Vec<Color> {
+    const MIN_DIST: f32 = 30.0;
+
     // Generate a Vec to store the color data
     let mut colors: Vec<(Luv, usize, [u8; 4], (usize, usize))> = Vec::new();
 
@@ -82,8 +82,8 @@ fn get_palette(
         let pixel_luv: Luv = pixel_srgb.into_color();
 
         //println!("{}", pixel_luv.distance(prev_color));
-        if pixel_luv.hybrid_distance(prev_color) < 60.0 {
-            //prev_color = pixel_luv;
+        if pixel_luv.hybrid_distance(prev_color) < 50.0 {
+            prev_color += (pixel_luv + prev_color) / 2.0;
             continue;
         }
 
